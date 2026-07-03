@@ -13,6 +13,7 @@
 #include <sstream>
 #include <fstream>
 #include <unistd.h>
+#include <fcntl.h>
 #include <sys/stat.h>
 #include "xdl.h"
 #include "log.h"
