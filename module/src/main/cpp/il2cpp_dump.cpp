@@ -605,7 +605,7 @@ void il2cpp_dump(const char *outDir) {
                 ((Assembly_GetTypes_ftn)assemblyGetTypes->methodPointer)(
                     reflectionAssembly, nullptr);
             auto items = reflectionTypes->vector;
-            LOGF("reflection types count: %d", reflectionTypes->max_length);
+            LOGF("reflection types count: %zu", (size_t)reflectionTypes->max_length);
             for (int j = 0; j < reflectionTypes->max_length; ++j) {
                 auto klass = il2cpp_class_from_system_type(
                     (Il2CppReflectionType *)items[j]);
