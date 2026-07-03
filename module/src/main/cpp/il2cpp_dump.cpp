@@ -449,30 +449,13 @@ static bool is_dir_writable(const std::string &path) {
     return true;
 }
 
-// Try to create + verify writable directory, falling back to su if needed
+// Try to create + verify writable directory
 static bool ensure_dir(const std::string &path) {
-    // Already exists and writable?
     if (access(path.c_str(), F_OK) == 0) {
         return is_dir_writable(path);
     }
-    // Try normal mkdir
     if (mkdir(path.c_str(), 0777) == 0) {
         return is_dir_writable(path);
-    }
-    // Try with su (root)
-    const char *su_paths[] = {
-        "/data/adb/magisk/su",
-        "/system/bin/su",
-        "/su/bin/su",
-        "su"
-    };
-    for (auto su : su_paths) {
-        std::string cmd = std::string(su) + " -c 'mkdir -p " + path + " && chmod 777 " + path + "'";
-        LOGW("trying: %s", cmd.c_str());
-        if (system(cmd.c_str()) == 0 && is_dir_writable(path)) {
-            LOGI("su succeeded");
-            return true;
-        }
     }
     return false;
 }
