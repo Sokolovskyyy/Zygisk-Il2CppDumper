@@ -413,12 +413,27 @@ static void add_class_to_json(cJSON *classesArray, Il2CppClass *klass,
 // ---------------------------------------------------------------------------
 // Main dump entry point
 // ---------------------------------------------------------------------------
-// Try to create directory, optionally via su if normal mkdir fails
+// Check if a directory is writable by creating + removing a temp file
+static bool is_dir_writable(const std::string &path) {
+    std::string test = path + "/.wtest";
+    int fd = open(test.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
+    if (fd < 0) return false;
+    close(fd);
+    unlink(test.c_str());
+    return true;
+}
+
+// Try to create + verify writable directory, falling back to su if needed
 static bool ensure_dir(const std::string &path) {
-    if (mkdir(path.c_str(), 0777) == 0 || errno == EEXIST) {
-        return true;
+    // Already exists and writable?
+    if (access(path.c_str(), F_OK) == 0) {
+        return is_dir_writable(path);
     }
-    // mkdir failed – try with su (root module)
+    // Try normal mkdir
+    if (mkdir(path.c_str(), 0777) == 0) {
+        return is_dir_writable(path);
+    }
+    // Try with su (root)
     const char *su_paths[] = {
         "/data/adb/magisk/su",
         "/system/bin/su",
@@ -428,9 +443,8 @@ static bool ensure_dir(const std::string &path) {
     for (auto su : su_paths) {
         std::string cmd = std::string(su) + " -c 'mkdir -p " + path + " && chmod 777 " + path + "'";
         LOGW("trying: %s", cmd.c_str());
-        int ret = system(cmd.c_str());
-        if (ret == 0) {
-            LOGI("su succeeded: %s", cmd.c_str());
+        if (system(cmd.c_str()) == 0 && is_dir_writable(path)) {
+            LOGI("su succeeded");
             return true;
         }
     }
