@@ -413,20 +413,34 @@ static void add_class_to_json(cJSON *classesArray, Il2CppClass *klass,
 // ---------------------------------------------------------------------------
 // Main dump entry point
 // ---------------------------------------------------------------------------
+// Try to create directory, optionally via su if normal mkdir fails
+static bool ensure_dir(const std::string &path) {
+    if (mkdir(path.c_str(), 0777) == 0 || errno == EEXIST) {
+        return true;
+    }
+    // mkdir failed – try with su (root module)
+    LOGW("mkdir %s failed (%s), trying su...", path.c_str(), strerror(errno));
+    std::string cmd = "su -c 'mkdir -p " + path + " && chmod 777 " + path + "'";
+    FILE *fp = popen(cmd.c_str(), "r");
+    if (!fp) return false;
+    int ret = pclose(fp);
+    if (ret == 0) return true;
+    // su also failed – fall back to app private dir
+    LOGW("su mkdir also failed (%d), will use app private dir", ret);
+    return false;
+}
+
 void il2cpp_dump(const char *outDir) {
     LOGI("dumping...");
 
-    // Primary output: /sdcard/MixMod/ (user-facing, easy access)
-    // Fallback: outDir/files/ (app private dir, always writable)
+    // Primary: /sdcard/MixMod/ (user-facing); fallback: outDir/files/
     std::string basePath = "/sdcard/MixMod/";
-    if (mkdir(basePath.c_str(), 0777) != 0 && errno != EEXIST) {
-        // /sdcard/ not writable from this context (Android 11+ scoped storage)
-        LOGW("mkdir %s failed: %s, falling back to %s/files/",
-             basePath.c_str(), strerror(errno), outDir);
+    if (!ensure_dir(basePath)) {
         basePath = std::string(outDir).append("/files/");
         mkdir(basePath.c_str(), 0777);
+        LOGI("fallback output path: %s", basePath.c_str());
     } else {
-        LOGI("using output path: %s", basePath.c_str());
+        LOGI("output path: %s", basePath.c_str());
     }
 
     size_t size;
