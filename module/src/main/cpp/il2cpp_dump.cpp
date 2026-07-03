@@ -19,6 +19,7 @@
 #include "il2cpp-tabledefs.h"
 #include "il2cpp-class.h"
 #include "cJSON.h"
+#include <errno.h>
 
 #define DO_API(r, n, p) r (*n) p
 
@@ -415,11 +416,17 @@ static void add_class_to_json(cJSON *classesArray, Il2CppClass *klass,
 void il2cpp_dump(const char *outDir) {
     LOGI("dumping...");
 
-    // Output to /sdcard/MixMod/ instead of the default outDir/files/
+    // Primary output: /sdcard/MixMod/ (user-facing, easy access)
+    // Fallback: outDir/files/ (app private dir, always writable)
     std::string basePath = "/sdcard/MixMod/";
-    if (mkdir(basePath.c_str(), 0777) != 0) {
-        // EEXIST is fine; other errors are logged but we proceed anyway
-        LOGI("mkdir %s (likely already exists, ignoring)", basePath.c_str());
+    if (mkdir(basePath.c_str(), 0777) != 0 && errno != EEXIST) {
+        // /sdcard/ not writable from this context (Android 11+ scoped storage)
+        LOGW("mkdir %s failed: %s, falling back to %s/files/",
+             basePath.c_str(), strerror(errno), outDir);
+        basePath = std::string(outDir).append("/files/");
+        mkdir(basePath.c_str(), 0777);
+    } else {
+        LOGI("using output path: %s", basePath.c_str());
     }
 
     size_t size;
