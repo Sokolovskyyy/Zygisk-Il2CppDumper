@@ -15,6 +15,21 @@ using zygisk::Api;
 using zygisk::AppSpecializeArgs;
 using zygisk::ServerSpecializeArgs;
 
+// Constructor: runs the moment the .so is loaded into memory
+// If this log appears in logcat, the module IS being loaded.
+__attribute__((constructor))
+void module_loaded() {
+    LOGI("module .so loaded into process");
+    // Also try a simple file write as a fallback diagnostic
+    int fd = open("/data/local/tmp/mixmod_loaded.txt", O_CREAT | O_WRONLY | O_TRUNC, 0666);
+    if (fd >= 0) {
+        char buf[64];
+        int len = snprintf(buf, sizeof(buf), "loaded\n");
+        write(fd, buf, (size_t)len);
+        close(fd);
+    }
+}
+
 class MyModule : public zygisk::ModuleBase {
 public:
     void onLoad(Api *api, JNIEnv *env) override {
