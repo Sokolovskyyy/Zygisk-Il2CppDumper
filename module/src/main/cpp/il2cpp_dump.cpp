@@ -414,6 +414,31 @@ static void add_class_to_json(cJSON *classesArray, Il2CppClass *klass,
 // ---------------------------------------------------------------------------
 // Main dump entry point
 // ---------------------------------------------------------------------------
+// File-backed logger: writes to both logcat and log.txt
+static FILE *g_log_file = nullptr;
+
+#define LOGF(...)                                                      \
+    do {                                                               \
+        LOGI(__VA_ARGS__);                                             \
+        if (g_log_file) {                                              \
+            fprintf(g_log_file, "[%.6s] ", "DUMP");                    \
+            fprintf(g_log_file, __VA_ARGS__);                          \
+            fprintf(g_log_file, "\n");                                 \
+            fflush(g_log_file);                                        \
+        }                                                              \
+    } while (0)
+
+#define LOGFW(...)                                                     \
+    do {                                                               \
+        LOGW(__VA_ARGS__);                                             \
+        if (g_log_file) {                                              \
+            fprintf(g_log_file, "[%.6s] ", "DUMP-W");                  \
+            fprintf(g_log_file, __VA_ARGS__);                          \
+            fprintf(g_log_file, "\n");                                 \
+            fflush(g_log_file);                                        \
+        }                                                              \
+    } while (0)
+
 // Check if a directory is writable by creating + removing a temp file
 static bool is_dir_writable(const std::string &path) {
     std::string test = path + "/.wtest";
@@ -453,27 +478,51 @@ static bool ensure_dir(const std::string &path) {
 }
 
 void il2cpp_dump(const char *outDir) {
-    LOGI("dumping...");
+    // Open log file before any directory logic – try primary path first
+    g_log_file = fopen("/sdcard/MixMod/log.txt", "w");
+    if (!g_log_file) {
+        // If sdcard not reachable, fallback to a known-writable location
+        std::string fb = std::string(outDir) + "/files/log.txt";
+        mkdir((std::string(outDir) + "/files/").c_str(), 0777);
+        g_log_file = fopen(fb.c_str(), "w");
+    }
+    LOGF("dumping...");
 
     // Primary: /sdcard/MixMod/ (user-facing); fallback: outDir/files/
     std::string basePath = "/sdcard/MixMod/";
     if (!ensure_dir(basePath)) {
+        LOGFW("primary path NOT writable: %s", basePath.c_str());
         basePath = std::string(outDir).append("/files/");
-        mkdir(basePath.c_str(), 0777);
-        LOGI("fallback output path: %s", basePath.c_str());
+        if (!ensure_dir(basePath)) {
+            LOGE("ALL PATHS FAILED – cannot write dumps");
+            if (g_log_file) { fclose(g_log_file); g_log_file = nullptr; }
+            return;
+        }
+        LOGFW("using fallback: %s", basePath.c_str());
     } else {
-        LOGI("output path: %s", basePath.c_str());
+        LOGF("output path: %s", basePath.c_str());
+    }
+    // Re-open log in the final writable directory
+    if (g_log_file) { fclose(g_log_file); g_log_file = nullptr; }
+    g_log_file = fopen((basePath + "log.txt").c_str(), "w");
+    if (g_log_file) {
+        LOGF("logging to %slog.txt", basePath.c_str());
+    } else {
+        LOGW("cannot open log.txt – logcat only");
     }
 
     size_t size;
     auto domain = il2cpp_domain_get();
     auto assemblies = il2cpp_domain_get_assemblies(domain, &size);
+    LOGF("assemblies count: %zu", size);
 
     // --- dump.cs header: image list ---
     std::stringstream imageOutput;
     for (size_t i = 0; i < size; ++i) {
         auto image = il2cpp_assembly_get_image(assemblies[i]);
-        imageOutput << "// Image " << i << ": " << il2cpp_image_get_name(image) << "\n";
+        const char *imgName = il2cpp_image_get_name(image);
+        imageOutput << "// Image " << i << ": " << imgName << "\n";
+        LOGF("image[%zu]: %s", i, imgName);
     }
 
     // --- JSON root ---
@@ -494,13 +543,14 @@ void il2cpp_dump(const char *outDir) {
     // Branch: il2cpp >= 2018.3  (il2cpp_image_get_class available)
     // ------------------------------------------------------------------
     if (il2cpp_image_get_class) {
-        LOGI("Version greater than 2018.3");
+        LOGF("Version greater than 2018.3");
         for (size_t i = 0; i < size; ++i) {
             auto image = il2cpp_assembly_get_image(assemblies[i]);
             const char *imageName = il2cpp_image_get_name(image);
             std::stringstream imageStr;
             imageStr << "\n// Dll : " << imageName;
             auto classCount = il2cpp_image_get_class_count(image);
+            LOGF("image[%zu] classCount=%zu", i, classCount);
             for (size_t j = 0; j < classCount; ++j) {
                 auto klass = il2cpp_image_get_class(image, j);
                 auto type = il2cpp_class_get_type(const_cast<Il2CppClass *>(klass));
@@ -517,7 +567,7 @@ void il2cpp_dump(const char *outDir) {
     // Branch: il2cpp < 2018.3  (use reflection)
     // ------------------------------------------------------------------
     else {
-        LOGI("Version less than 2018.3");
+        LOGF("Version less than 2018.3");
         auto corlib = il2cpp_get_corlib();
         auto assemblyClass = il2cpp_class_from_name(corlib, "System.Reflection",
                                                     "Assembly");
@@ -526,15 +576,15 @@ void il2cpp_dump(const char *outDir) {
         auto assemblyGetTypes = il2cpp_class_get_method_from_name(assemblyClass,
                                                                   "GetTypes", 0);
         if (assemblyLoad && assemblyLoad->methodPointer) {
-            LOGI("Assembly::Load: %p", assemblyLoad->methodPointer);
+            LOGF("Assembly::Load: %p", assemblyLoad->methodPointer);
         } else {
-            LOGI("miss Assembly::Load");
+            LOGF("miss Assembly::Load");
             return;
         }
         if (assemblyGetTypes && assemblyGetTypes->methodPointer) {
-            LOGI("Assembly::GetTypes: %p", assemblyGetTypes->methodPointer);
+            LOGF("Assembly::GetTypes: %p", assemblyGetTypes->methodPointer);
         } else {
-            LOGI("miss Assembly::GetTypes");
+            LOGF("miss Assembly::GetTypes");
             return;
         }
         typedef void *(*Assembly_Load_ftn)(void *, Il2CppString *, void *);
@@ -555,6 +605,7 @@ void il2cpp_dump(const char *outDir) {
                 ((Assembly_GetTypes_ftn)assemblyGetTypes->methodPointer)(
                     reflectionAssembly, nullptr);
             auto items = reflectionTypes->vector;
+            LOGF("reflection types count: %d", reflectionTypes->max_length);
             for (int j = 0; j < reflectionTypes->max_length; ++j) {
                 auto klass = il2cpp_class_from_system_type(
                     (Il2CppReflectionType *)items[j]);
@@ -569,7 +620,7 @@ void il2cpp_dump(const char *outDir) {
     }
 
     // ---- Write dump.cs ----
-    LOGI("write dump.cs");
+    LOGF("writing dump.cs");
     {
         std::ofstream outStream(basePath + "dump.cs");
         outStream << imageOutput.str();
@@ -578,9 +629,10 @@ void il2cpp_dump(const char *outDir) {
         }
         outStream.close();
     }
+    LOGF("dump.cs written (%zu classes)", outPuts.size());
 
     // ---- Write offsets.json ----
-    LOGI("write offsets.json");
+    LOGF("writing offsets.json");
     {
         char *jsonStr = cJSON_Print(root);
         std::ofstream jsonOut(basePath + "offsets.json");
@@ -589,9 +641,10 @@ void il2cpp_dump(const char *outDir) {
         free(jsonStr);
     }
     cJSON_Delete(root);
+    LOGF("offsets.json written");
 
     // ---- Write il2cpp.h (helper header for the mod) ----
-    LOGI("write il2cpp.h");
+    LOGF("writing il2cpp.h");
     {
         std::ofstream hdr(basePath + "il2cpp.h");
         hdr << "// Auto-generated by Zygisk-Il2CppDumper for Hearthstone CN\n";
@@ -617,6 +670,8 @@ void il2cpp_dump(const char *outDir) {
         hdr << "#endif // MIXMOD_IL2CPP_H\n";
         hdr.close();
     }
+    LOGF("il2cpp.h written");
 
-    LOGI("dump done! files in %s", basePath.c_str());
+    if (g_log_file) { fclose(g_log_file); g_log_file = nullptr; }
+    LOGF("dump done! files in %s", basePath.c_str());
 }
