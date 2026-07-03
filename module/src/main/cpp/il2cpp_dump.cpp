@@ -419,14 +419,21 @@ static bool ensure_dir(const std::string &path) {
         return true;
     }
     // mkdir failed – try with su (root module)
-    LOGW("mkdir %s failed (%s), trying su...", path.c_str(), strerror(errno));
-    std::string cmd = "su -c 'mkdir -p " + path + " && chmod 777 " + path + "'";
-    FILE *fp = popen(cmd.c_str(), "r");
-    if (!fp) return false;
-    int ret = pclose(fp);
-    if (ret == 0) return true;
-    // su also failed – fall back to app private dir
-    LOGW("su mkdir also failed (%d), will use app private dir", ret);
+    const char *su_paths[] = {
+        "/data/adb/magisk/su",
+        "/system/bin/su",
+        "/su/bin/su",
+        "su"
+    };
+    for (auto su : su_paths) {
+        std::string cmd = std::string(su) + " -c 'mkdir -p " + path + " && chmod 777 " + path + "'";
+        LOGW("trying: %s", cmd.c_str());
+        int ret = system(cmd.c_str());
+        if (ret == 0) {
+            LOGI("su succeeded: %s", cmd.c_str());
+            return true;
+        }
+    }
     return false;
 }
 
