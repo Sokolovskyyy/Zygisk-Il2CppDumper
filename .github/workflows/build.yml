@@ -1,10 +1,10 @@
 name: Build
 on:
   workflow_dispatch:
-      inputs:
-        package_name:
-          description: "Package name of the game:"
-          required: true
+    inputs:
+      package_name:
+        description: "Package name of the game:"
+        required: true
 
 jobs:
   build:
@@ -16,11 +16,14 @@ jobs:
         distribution: temurin
         java-version: 11
         cache: gradle
-    - run: |
+    - name: Build module
+      run: |
         chmod +x ./gradlew
-        sed -i 's/moduleDescription = "/moduleDescription = "(${{ github.event.inputs.package_name }}) /g' module.gradle
-        sed -i "s/^#define GamePackageName.*/#define GamePackageName \"${{ github.event.inputs.package_name }}\"/" module/src/main/cpp/game.h
+        sed -i "s/^\(moduleDescription = \"\)/\1(${PACKAGE_NAME}) /" module.gradle
+        sed -i "s/^#define GamePackageName.*/#define GamePackageName \"${PACKAGE_NAME}\"/" module/src/main/cpp/game.h
         ./gradlew :module:assembleRelease
+      env:
+        PACKAGE_NAME: ${{ github.event.inputs.package_name }}
     - uses: actions/upload-artifact@v4
       with:
         name: zygisk-il2cppdumper
