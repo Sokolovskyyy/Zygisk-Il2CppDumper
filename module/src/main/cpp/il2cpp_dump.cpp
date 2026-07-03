@@ -461,37 +461,39 @@ static bool ensure_dir(const std::string &path) {
 }
 
 void il2cpp_dump(const char *outDir) {
-    // Open log file before any directory logic – try primary path first
-    g_log_file = fopen("/sdcard/MixMod/log.txt", "w");
+    // Primary path: the game's own private data dir. This is ALWAYS writable
+    // by the game's own process (same SELinux domain, same UID) regardless of
+    // scoped storage / SELinux restrictions on /sdcard and /data/local/tmp.
+    // We open the log here FIRST so that even a total failure of the
+    // /sdcard/MixMod path below is guaranteed to be recorded somewhere.
+    std::string basePath = std::string(outDir).append("/files/");
+    bool primary_ok = ensure_dir(basePath);
+    if (primary_ok) {
+        g_log_file = fopen((basePath + "log.txt").c_str(), "w");
+    }
     if (!g_log_file) {
-        // If sdcard not reachable, fallback to a known-writable location
-        std::string fb = std::string(outDir) + "/files/log.txt";
-        mkdir((std::string(outDir) + "/files/").c_str(), 0777);
-        g_log_file = fopen(fb.c_str(), "w");
-    }
-    LOGF("dumping...");
-
-    // Primary: /sdcard/MixMod/ (user-facing); fallback: outDir/files/
-    std::string basePath = "/sdcard/MixMod/";
-    if (!ensure_dir(basePath)) {
-        LOGFW("primary path NOT writable: %s", basePath.c_str());
-        basePath = std::string(outDir).append("/files/");
-        if (!ensure_dir(basePath)) {
-            LOGE("ALL PATHS FAILED – cannot write dumps");
-            if (g_log_file) { fclose(g_log_file); g_log_file = nullptr; }
-            return;
+        // Extremely unlikely (would mean the app can't write its own data
+        // dir), but keep the old sdcard attempt as a last resort so we don't
+        // regress silently.
+        primary_ok = false;
+        basePath = "/sdcard/MixMod/";
+        if (ensure_dir(basePath)) {
+            g_log_file = fopen((basePath + "log.txt").c_str(), "w");
         }
-        LOGFW("using fallback: %s", basePath.c_str());
-    } else {
-        LOGF("output path: %s", basePath.c_str());
     }
-    // Re-open log in the final writable directory
-    if (g_log_file) { fclose(g_log_file); g_log_file = nullptr; }
-    g_log_file = fopen((basePath + "log.txt").c_str(), "w");
-    if (g_log_file) {
-        LOGF("logging to %slog.txt", basePath.c_str());
-    } else {
-        LOGW("cannot open log.txt – logcat only");
+    LOGF("dumping... primary_path=%s primary_ok=%d", basePath.c_str(), primary_ok);
+
+    // Secondary: also try to mirror into /sdcard/MixMod/ for convenience.
+    // Failure here is logged but never blocks the dump itself.
+    if (primary_ok) {
+        std::string sdPath = "/sdcard/MixMod/";
+        if (ensure_dir(sdPath)) {
+            LOGF("mirror path also writable: %s", sdPath.c_str());
+        } else {
+            LOGFW("mirror path NOT writable (errno=%d %s): %s — dump will only "
+                  "be under app data dir (%s)", errno, strerror(errno),
+                  sdPath.c_str(), basePath.c_str());
+        }
     }
 
     size_t size;
